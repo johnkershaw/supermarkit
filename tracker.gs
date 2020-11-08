@@ -209,9 +209,15 @@ function getStudentByEmail(studentEmail) {
 function getStudents() {
   // students is now global for speed (!) 
   if (top.students !== undefined && top.students.length != 0) {
-    console.log("Skipping creation of students", top.students.length);
-    return top.students;
+    console.log("top.students already contains %s members", top.students.length);
+  } else {
+    top.students = initialiseStudents();
   }
+  if (top.students === undefined || top.students.length == 0) {
+    console.error("top.students is empty - BIG PROBLEM!");
+    throw "top.students is empty - BIG PROBLEM!";
+  }
+  return top.students;
 }
 
 function initialiseStudents() {
@@ -249,12 +255,12 @@ function initialiseStudents() {
     if (student.email.length < 2 || 
         student.lastname.length < 2 || 
         student.firstname.length < 2 || 
-        student.year.length != 3) {
+        student.year.length < 3) {
       logIt(student.email + ", " + 
             student.lastname + ", " + 
             student.firstname + ", " + 
             student.year, meta);
-      throw "Damaged / incomplete student record in Portfolios spreadsheet - CHECK & FIX IMMEDIATELY (row " + student.row + ")";
+      throw "Damaged / incomplete student record in Portfolios spreadsheet - required: firstname, lastname, email & year - fix & try again (row " + student.row + ")";
     } else {
       students.push(student);
     }
@@ -272,7 +278,9 @@ function getStudent(student) {
   // search RB Tracker for student.email:
   // return student or return student.row = -1
   
+  var students = getStudents();
   var studentFound = false;
+  
   for (var s=0; s < top.students.length; s++) {
     var thisStudent = top.students[s];
     if (thisStudent.email == student.email) {
@@ -298,7 +306,7 @@ function getStudent(student) {
 function createStudents() {
   // once students are in the Portfolios tab (first, last, email)
   // run this script to generate Portfolio files for them all
-  //var students = initialiseStudents();
+  var students = getStudents();
   
   for (var i = 0; i < top.students.length; i++) {
     //if (i > 2) break;
@@ -306,14 +314,16 @@ function createStudents() {
     var student = top.students[i];
     Logger.log(student.fullname);
     
-    student = createStudent(student);    
+    if (! student.fileid || student.fileid.length < 10) {
+      student = createStudent(student);    
+    }
   }
 }
 
 
 function createStudent(student) {
   var meta = {'tag': arguments.callee.name, "dest": "L"};
-
+  updatePortfoliosSheetFormulas();
   // already exists?
   if (getStudent(student).row > 0) {
     updateStudentRow(student);
@@ -378,6 +388,8 @@ function createPortfolioRow(student) {
     ]);
     studentRow = sheet.getLastRow();
     student.row = studentRow;
+    
+    updatePortfoliosSheetFormulas();
   }
 
   updateStudentRow(student);
@@ -391,10 +403,11 @@ function updateStudentRow(student) {
   .openById(top.FILES.RBTRACKER)
   .getSheetByName(top.SHEETS.PORTFOLIOS);
   
-  updatePortfolioFormulas();
+  // was updatePortfoliosSheetFormulas(student.row);
 
   student.fullname = sheet.getRange(student.row, top.COLS.FULLNAME).getValue();
   student.filename = sheet.getRange(student.row, top.COLS.FILENAME).getValue();
+  student.aa00 = sheet.getRange(student.row, top.COLS.YEAR).getValue();
 
   if (! student.fileid || student.fileid.length < 10) {
     student = createPortfolioFile(student);
@@ -415,6 +428,7 @@ function TEST_createPortfolioFile() {
   student.firstname = "Test";
   student.lastname = "Student";
   student.email = "test.student@hope.edu.kh";
+  student.aa00 = "SR";
   student.fullname = student.firstname + " " + student.lastname;
   
   student = createPortfolioFile(student);
@@ -458,11 +472,16 @@ function createPortfolioFile(student) {
     student.fileid = student.file.getId();
     
     // copy the Pastoral sheet from the Templates document
-    var pastoralSheetName = "Pastoral";  
-    var pastoralTemplateSheet = templatesId.getSheetByName(pastoralSheetName);
+    var aa00 = student.aa00.slice(0,2);
+    if (['PP', 'SR'].indexOf(aa00) == -1) {
+      aa00 = 'PP'; // default value
+    }
+    var pastoralMasterName = 'Pastoral' + aa00;
+    var pastoralSheetName = top.SHEETS.PASTORAL; // "Pastoral";  
+    var pastoralTemplateSheet = templatesId.getSheetByName(pastoralMasterName);
     
     var pastoralSheet = pastoralTemplateSheet.copyTo(student.file)
-    .setName("Pastoral")
+    .setName(pastoralSheetName)
     .getRange("B4").setValue(student.fullname);
     
     

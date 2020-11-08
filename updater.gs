@@ -6,37 +6,65 @@
 
 
 function updateReportbooks() {
-  var rbIds = getRbIds();
+  var makeChanges = true; // if false, just log mismatch
   
-  var aaa_testerbook = "1cLCGk3RBa-Y5zqf7CT8GEwDRD-GtJBOka7_41NUsi5U";
-  var phy09copy = "1dQra-gLWOZ0oLiUCsGXPGeGNnZQaqI2rEynAYbstdS8";
-  var englit09 = "1qvEbFGLUMEAxGfk0Bmfnb1Y5nvUGMICWPdNcCXQ9__E";
-  var csc10 = "1jI0UpPD9Imz9SUXwcRUI8CaucrHuKhOg_Mi5GQJKJFI";
-  //var rbIds = [csc10];
+  logMe("START: Pre-check Reportbooks");
   
-  for (var i=0; i < rbIds.length; i++) {
+  var rbRows = getRbRows();
+  
+  for (var row = 0; row < rbRows.length; row++) {
+    var rbRow = rbRows[row];
+    var id = rbRow.rbId;
+    var sync = rbRow.Sync;
+    //var geo2019sl = "1HV01YukUG42Gytg1Ve6fO1veFSudRCdKsU0Q9ph6_Xw";
     
+    // only look if 'sync' checked, skip empty rbIds
+    if (!sync || ! id || id.length < 2) { 
+      continue;
+    }
+    
+    logMe("UPDATE: " + rbRow.courseName);
+
     // SAFETY CATCH =============================
     
-    //if (i>10) break; // stop after two reportbooks
+    //if (row > 2) break; // stop after n reportbooks
     
     // END SAFETY CATCH =========================
     
-    id = rbIds[i];
     var ss = SpreadsheetApp.openById(id);
-    //console.info("Updating " + ss.getName());
+    //logMe("Updating " + ss.getName() );
+    var rbSubject = rbRow["Subject Name in Report"];
+    var rbTeacher = rbRow["ownerName"];
     
     var overviewSubjectTeacher = ss.getSheetByName(top.SHEETS.OVERVIEW)
     .getRange("B1:B2").getValues();
-    console.log("[%s] %s", ss.getName(), overviewSubjectTeacher);
+    var overviewSubject = overviewSubjectTeacher[0][0];
+    var overviewTeacher = overviewSubjectTeacher[1][0];
+    
+    console.log( "fileName: %s", ss.getName() );
+    var updateMeta = false;
+    if (rbSubject != overviewSubject) {
+      updateMeta = true;
+      logMe("WARN: Mismatched SUBJECT: Overview=" + overviewSubject + " but Reportbook=" + rbSubject + ' in ' + ss.getName(), 'warn');
+    }
+    if (rbTeacher != overviewTeacher) {
+      updateMeta = true;
+      logMe("WARN: Mismatched TEACHER: Overview=" + overviewTeacher + " but Reportbook=" + rbTeacher + ' in ' + ss.getName(), 'warn');
+    }
+    
+    if (makeChanges && updateMeta) {
+      // FIXME: Need to pull subjectName, teacherName from Reportbooks tab
+      updateReportbookMetadata(id, rbSubject, rbTeacher);
+    }
     
     //    updateCommentsColumn(ss);
     //    updateExportColumns(ss);
     //    updateFreezeRows(ss);
-    //    updateRBFormulas(ss);
+    updateRBFormulas(ss);
+    updateIBPercentages(ss);
     //    updateDeleteUnusedDatesAndTitles(ss);
-    // updateGradeScale(ss);
-    // updateConditionalFormatting(ss); // doesn't work in this scope :(
+    //updateGradeScale(ss);
+    //updateConditionalFormatting(ss); // doesn't work in this scope :(
     
     //   sheet(report)
     //     // display comment
@@ -44,9 +72,21 @@ function updateReportbooks() {
     //      =iferror(index(Grades!$D$7:$Y$46, match($B$4,Grades!$D$7:$D$46,0),22),"")
     //     .chartType(scatter)
     //     .trendLines(false)
-    
-    SpreadsheetApp.flush();
+  
+    Utilities.sleep(1000);
   }
+}
+
+function TEST_updateIBPercentages() {
+  var id = '1AkMktNVONfzThEL69Uxed7RKJwCDaLCirUVXHmJ0rdM';
+  var ss = SpreadsheetApp.openById(id);
+  updateIBPercentages(ss);
+}
+
+function updateIBPercentages(ss) {
+ var sheet = ss.getSheetByName(top.SHEETS.INDREP);
+  sheet.getRange("D7:D11")
+  .setNumberFormat('#');
 }
 
 function updateDeleteUnusedDatesAndTitles(ss) {
@@ -150,17 +190,143 @@ function updateExportColumns(ss) {
 };
 // END updateExportColumns
 
+function formatIds() {
+// 1-time script to enforce conditionalFormatting directly by file id!
+  var ids = [
+    "1dHXH95BUJ-cv43d90MTHrqgdl_i8pMnM9s_UeAvni4c"
+    ];
+
+  for (var i=0; i<ids.length; i++) {
+    id = ids[i];
+    var ss = SpreadsheetApp.openById(id);
+    updateConditionalFormatting(ss);
+   // if (i > 2) break;
+  };
+}
+
 function updateConditionalFormatting(ss) {
-  var conditionalFormatRules = ss.getActiveSheet().getConditionalFormatRules();
+  var sheet = ss.getSheetByName("Grades");
+  var rules = sheet.getConditionalFormatRules();
+  while (rules.length > 0) {
+    Logger.log(rules);
+    rules.pop();
+  }
   
-  ss.getActiveSheet().setConditionalFormatRules(conditionalFormatRules);
-  conditionalFormatRules = ss.getActiveSheet().getConditionalFormatRules();
-  conditionalFormatRules.splice(conditionalFormatRules.length - 1, 1, SpreadsheetApp.newConditionalFormatRule()
-  .setRanges([ss.getRange('Z7:Z46')])
-  .whenTextEqualTo('y')
-  .setBackground('#FF00FF')
-  .build());
-  ss.getActiveSheet().setConditionalFormatRules(conditionalFormatRules);
+  // color title cells
+  // if they are REP okay
+  var range = sheet.getRange("H3:W3");
+ 
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=regexmatch(H3, " REP[0-9% ]*\\z")')
+  .setBackground("#33691e")
+  .setFontColor("#FFFFFF")
+  .setRanges([range])
+  .build();
+  rules.push(rule);
+
+  // color extracted REP cells (top row)
+  var range = sheet.getRange("H1:W1");
+ 
+  // if title is blank, make REP fg=bg
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=isblank(H3)')
+  .setBackground("#2a3990")
+  .setFontColor("#2a3990")
+  .setRanges([range])
+  .build();
+  rules.push(rule);
+  
+  // if class avg is blank, make REP bg grey
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=isblank(H6)')
+  .setBackground("#666666")
+  .setFontColor("#FFFFFF")
+  .setRanges([range])
+  .build();
+  rules.push(rule);
+
+  
+  // Adds conditional format rules to the Grades sheet 
+  // that causes imported grades to turn different colors
+  // if they satisfy A/B/C/D/E conditions based on 
+  // the thresholds in the Overview sheet 
+  var range = sheet.getRange("H7:W45");
+
+  // 0 (red)
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=if(isnumber(H7), H7/H$4 = 0, "")')
+  .setBackground("#FF0000")
+  .setFontColor("#FFFFFF")
+  .setRanges([range])
+  .build();
+  rules.push(rule);
+
+  // Missing (grey)
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=isblank(H7)')
+  .setBackground("#d9d9d9")
+  .setFontColor("#000000")
+  .setRanges([range])
+  .build();  
+  rules.push(rule);
+
+  // A (dark green)
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=(H7/H$4 >= indirect("Overview!B10")/100)')
+  .setBackground("#6aa84f")
+  .setFontColor("#000000")
+  .setRanges([range])
+  .build();  
+  rules.push(rule);
+  
+  // B (light green)
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=H7/H$4 >= indirect("Overview!B13")/100')
+  .setBackground("#b6d7a8")
+  .setFontColor("#000000")
+  .setRanges([range])
+  .build();  
+  rules.push(rule);
+  
+  // C (light yellow)
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=H7/H$4 >= indirect("Overview!B16")/100')
+  .setBackground("#fff2cc")
+  .setFontColor("#000000")
+  .setRanges([range])
+  .build();  
+  rules.push(rule);
+  
+  // D (light orange)
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=H7/H$4 >= indirect("Overview!B19")/100')
+  .setBackground("#f9cb9c")
+  .setFontColor("#000000")
+  .setRanges([range])
+  .build();  
+  rules.push(rule);
+  
+  // E (salmon)
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=H7/H$4 < indirect("Overview!B19")/100')
+  .setBackground("#ea9999")
+  .setFontColor("#000000")
+  .setRanges([range])
+  .build();  
+  rules.push(rule);
+  
+  // color alternate lines grey
+  var range = sheet.getRange("H1:W1");
+  
+  var rule = SpreadsheetApp.newConditionalFormatRule()
+  .whenFormulaSatisfied('=iseven(row())')
+  .setBackground("#f9f9f9")
+  .setFontColor("#000000")
+  .setRanges([range])
+  .build();  
+  rules.push(rule);
+  
+  sheet.setConditionalFormatRules(rules);
 }
 
 function updateFreezeRows(ss) {
@@ -184,11 +350,11 @@ function updateValues(sheet, rangeA1, oldValues, newValues) {
   for (var r = 0; r < data.length; r++) {
     for (var c = 0; c < data[0].length; c++) {
       var cellValue = data[r][c];
-      Logger.log("Checking cell["+r+"]["+c+"]=" + cellValue);
+      //Logger.log("Checking cell["+r+"]["+c+"]=" + cellValue);
       for (var v = 0; v < oldValues.length; v++) {
         if (cellValue == oldValues[v]) {
           data[r][c] = newValues[v];
-          Logger.log("Updated cellValue from " + oldValues[v] + " to " + newValues[v]);
+          //Logger.log("Updated cellValue from " + oldValues[v] + " to " + newValues[v]);
         }
       }
     }
@@ -200,38 +366,103 @@ function updateValues(sheet, rangeA1, oldValues, newValues) {
 
 function test_updatePortfolios() {
   // convert the attributes table to full sentences
-  var testEmail = "bobby.tables@students.hope.edu.kh";
-  testEmail = "johannes.christensen@students.hope.edu.kh";
-  testEmail = "nawin.vong@students.hope.edu.kh";
+  var testEmail;
+  testEmail = "bobby.tables@students.hope.edu.kh";
+  //testEmail = "johannes.christensen@students.hope.edu.kh";
+  //testEmail = "tom.kershaw@students.hope.edu.kh";
   var student = getStudentByEmail(testEmail);
   var pf = SpreadsheetApp.openById(student.fileid);
-  updatePortfolioWrapExtraCurricular(pf);
+  updatePortfolioMergeAndWrapExtraCurricular(pf);
+}
+
+function updateSelectedPortfoliosFormulas() {
+  var students = getStudents();  
+  var selectedStudentEmails = getEmailsToUpdate();
+  
+  var formulas = [
+    {
+      // update introduction label
+      "sheet": "Pastoral", 
+      "cell": "B3", 
+      "range": "", 
+      "formula": '=if(len(B4)>1, "INDIVIDUAL REPORT FOR", "")',
+      // TODO "r1c1": false
+    },
+    {
+      // update Pastoral Comment label
+      "sheet": "Pastoral", 
+      "cell": "B6", 
+      "range": "", 
+      "formula": '=if(istext(B7), "Pastoral Comment", "")',
+      // TODO "r1c1": false;
+    },
+    {
+      // update Extra-Curricular label
+      "sheet": "Pastoral", 
+      "cell": "B11", 
+      "range": "", 
+      "formula": '=if(istext(B12), "Extra curricular activities", "")',
+      // TODO "r1c1": false;
+    },
+    {
+      // update Attendance label
+      "sheet": "Pastoral",
+      "cell": "B26",
+      "range": "",
+      "formula": '=if(isblank(C26), "", "Attendance:")',
+    },
+  ];
+    logMe('START: Updating Pastoral formulas');
+      
+  for (var s = 0; s < top.students.length; s++) {
+    //if (s >= 5) break; // already limited by 🗹
+    
+    var student = students[s];
+    if (selectedStudentEmails.indexOf(student.email) > -1) {
+      var pf = SpreadsheetApp.openById(student.fileid);
+      logMe('Updating Pastoral formulas for ' + student.fullname);
+      updateFormulas(pf, formulas);
+    }
+  }  
+    logMe('END: Updating Pastoral formulas');
+
 }
 
 function updateAllPortfolios() {
-  
   var students = getStudents();
   for (var s = 0; s < students.length; s++) {
-    //if (s > 2) break;
+    if (s > 3) break;
     
     var student = students[s];
-    console.log("%s %s", student.fullname, student.fileid); 
+    logMe("UPDATE: Tidying Portfolio for " + student.fullname); 
     var pf = SpreadsheetApp.openById(student.fileid);
     
-    //updatePortfolioAttributes(pf);
-    updatePortfolioWrapExtraCurricular(pf);    
+    // updatePortfolioAttributes(pf);
+    // updatePortfolioMergeAndWrapExtraCurricular(pf);    
   }
 }
 
-function updatePortfolioWrapExtraCurricular(pf) {
+
+
+function updatePortfolioMergeAndWrapExtraCurricular(pf) {
+  Logger.log("updatePortfolioMergeAndWrapExtraCurricular for file id %s", pf.getName());
+
   var pastoralSheet = pf.getSheetByName(top.SHEETS.PASTORAL);
-  pastoralSheet.getRange("B12")
+  
+  // make extracurricular 3 lines long & text-wrapped
+  pastoralSheet.getRange("B12:B14")
+  .merge()
   .setHorizontalAlignment("left")
   .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  
+  // delete the 'always / mostly' that sit to the right of the merged field
+  pastoralSheet.getRange("C15:C23")
+  .clearContent();
 }
 
 function updatePortfolioAttributes(pf) {
   // one-shot function, probably never need again
+  
   Logger.log ("Name: " + pf.getName());
   var pastoralSheet = pf.getSheetByName(top.SHEETS.PASTORAL);
   
@@ -254,7 +485,7 @@ function updatePortfolioAttributes(pf) {
   
 }
 
-function updatePortfolioFormulas() {
+function updatePortfoliosSheetFormulas() {
   
   var formulas = [
     {
@@ -345,37 +576,39 @@ function updatePortfolioFormulas() {
 //}
 
 function updateRBFormulas(ss) {
+  logMe("FORMAT: Skip blanks, REP >> weighting " + ss.getName(), 'log' );
   
   var formulas = [
     {
-      // F6=if(istext(A6), index(Grades, match($G6*100,GradeRange,-1), 1),"")
-      "desc": "if the Last name column is empty, don't display a grade (eg E-)",
-      "sheet": "Grades", 
-      "cell": "F6", 
-      "range": "F7:F", 
-      "formula": '=if(istext(A6), index(Grades, match($G6*100,GradeRange,-1), 1),"")'
-    },
-    {
-      // G6=sum(arrayformula(iferror(($H$1:$X$1 / sumif($H6:$X6, "<>", $H$1:$X$1)) * (H6:X6 / $H$4:$X$4))))
-      "desc": "if the grade is blank, don't include it in the weighting denominator",
-      "sheet": "Grades", 
-      "cell": "G6", 
-      "range": "G7:G", 
-      "formula": '=sum(arrayformula(iferror(($H$1:$X$1 / sumif($H6:$X6, "<>", $H$1:$X$1)) * (H6:X6 / $H$4:$X$4))))'
-    },
-    {
-      "desc": "if the grade is blank, don't include it in the graph",
+      "desc": "replace REP20% with weighting 20%",
       "sheet": "Individual report",
-      "cell": "F8",
+      "cell": "B6",
       "range": "",
-      "formula": '=arrayformula(if(index(Grades!$H$7:$Y$46, match($B$4,Grades!$D$7:$D$46,0)) = "", "", iferror(index(Grades!$H$7:$Y$46, match($B$4,Grades!$D$7:$D$46,0))/PointValues)))'
-    },
-    {"desc": "replace REP20% with weighting 20%",
-     "sheet": "Individual report",
-     "cell": "B6",
-     "range": "",
-     "formula": '=arrayformula(REGEXREPLACE({Grades!D3:X3}, " REP ?([0-9]*%?)\\z", " weighting $1"))'
-    } 
+      "formula": '=arrayformula(REGEXREPLACE({Grades!D3:X3}, " REP ?([0-9]*%?)\\z", " weighting $1"))'
+    }, 
+//    {
+//      // F6=if(istext(A6), index(Grades, match($G6*100,GradeRange,-1), 1),"")
+//      "desc": "if the Last name column is empty, don't display a grade (eg E-)",
+//      "sheet": "Grades", 
+//      "cell": "F6", 
+//      "range": "F7:F", 
+//      "formula": '=if(istext(A6), index(Grades, match($G6*100,GradeRange,-1), 1),"")'
+//    },
+//    {
+//      // G6=sum(arrayformula(iferror(($H$1:$X$1 / sumif($H6:$X6, "<>", $H$1:$X$1)) * (H6:X6 / $H$4:$X$4))))
+//      "desc": "if the grade is blank, don't include it in the weighting denominator",
+//      "sheet": "Grades", 
+//      "cell": "G6", 
+//      "range": "G7:G", 
+//      "formula": '=sum(arrayformula(iferror(($H$1:$X$1 / sumif($H6:$X6, "<>", $H$1:$X$1)) * (H6:X6 / $H$4:$X$4))))'
+//    },
+//    {
+//      "desc": "if the grade is blank, don't include it in the graph",
+//      "sheet": "Individual report",
+//      "cell": "F8",
+//      "range": "",
+//      "formula": '=arrayformula(if(index(Grades!$H$7:$Y$46, match($B$4,Grades!$D$7:$D$46,0)) = "", "", iferror(index(Grades!$H$7:$Y$46, match($B$4,Grades!$D$7:$D$46,0))/PointValues)))'
+//    },
   ];
 
   updateFormulas(ss, formulas);
@@ -445,3 +678,4 @@ function exportButton() {
   // sheet = "Individual report";
   // sheet.copyTo(name, B4:X11
 }
+

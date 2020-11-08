@@ -17,34 +17,6 @@ function testTracker() {
 }
 
 
-
-
-function logIt(msg, meta, dest_override) {
-  var redirectAll = ""; // or "" 
-  
-  if (meta === undefined) meta = {tag: "???", "dest": "L"};
-  if (meta.dest === undefined) metadest = "L";
-  if (dest_override !== undefined) meta.dest = dest_override;
-  
-  var output = {};
-  output.text = meta.tag + "> " + msg; 
-  output.dest = meta.dest;
-
-  if (redirectAll != false) {
-    output.dest = redirectAll;
-  }
-  
-  if (output.dest == "L") {
-    Logger.log(output.text);
-  }
-  
-  if (output.dest == "C") {
-    console.info(output.text);
-  }
-  
-  return output;
-}
-
 function testLogIt() {
   var meta = {'tag': arguments.callee.name, "dest": "L"};
   var m = "Message";

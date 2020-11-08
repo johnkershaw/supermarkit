@@ -1,185 +1,215 @@
 // files.gs ====================================================
-// imports files newly shared to Klaus, adds them to the tracker
+// imports files newly shared to Klaus, adds them to the tracker (replaced by Import Courses)
+// killByName for removing duplicate/broken Portfolio sheets
+// exports finished portfolios to pdf & emails
 // =============================================================
 
-// wrapper to move newly shared files to Reportbooks folder 
-// then add them to the Reportbook Tracker
-function listReportbooks() {
-  Logger.log("Moving any newly shared reportbooks into the Reportbooks folder");
-  movedFiles = moveSharedReportbooks();
-  if (movedFiles.length > 0) {
-    Logger.log(movedFiles);
-  }
-  
-  Logger.log("Copying list of files in Reportbooks folder to Reportbooks Tracker spreadsheet");
-  listOfRBs = listFolderIntoSheet('Reportbooks');
-  
-  copyReportbooksDataToTracker();
-}
-
-// generates a spreadsheet containing id, title, URL and owner for each item in the Reportbooks folder (top-level)
-function listFolderIntoSheet(foldername) {
-  // var foldername = '';
-  var filename = 'list ' + foldername;
-  var folderID =  folderRB;
-  var folder = DriveApp.getFolderById(folderID);
-  var contents = folder.getFiles();
-  var src_id = "1EAW-XHHtA1gIFoXe3sruqTHXtKi07xBxP4oXbWObCgU";
-  
-  try {
-    var ss = SpreadsheetApp.openById(src_id);
-    Logger.log('Successfully opened file ' + src_id);
-    }
-  
-  catch (err) {
-    Logger.log(err)
-    var ss = SpreadsheetApp.create(filename);
-    var src_id = ss.getId();
-    Logger.log('Created new listing file: ' + src_id);
-  }
-  
-  var fileId = ss.getId();
-  Logger.log('fileId: ' + fileId);
-  
-  var sheets = ss.getSheets();
-  var sheet = ss.setActiveSheet(sheets[0]);
-  sheet.clearContents();
-    
-  var id, file, title, link, owner, name;
-  var row;
-  var cells = [];
-  
-  while(contents.hasNext()) {
-    file = contents.next();
-    id = file.getId();
-    title = file.getName();
-    link = file.getUrl();
-    owner = file.getOwner().getName();
-    name = file.getOwner().getEmail();
-    
-    cells.push([id, title, link, owner, name]);
-  }
-
-  cells.sort(Comparator);
-  cells = [['id', 'title', 'link', 'owner', 'email']].concat(cells);
-  
-  Logger.log("Got the cells");
-  //Logger.log(cells);
-  sheet.getRange(1, 1, cells.length, cells[0].length).setValues(cells);
-
-  return true;
-
-};
-
-
-
-// sort by columns
-function Comparator(arrayA, arrayB) {
-  var sort1 = 3;
-  var sort2 = 1;
-  
-  if (arrayA[sort1] < arrayB[sort1]) return -1;
-  if (arrayA[sort1] > arrayB[sort1]) return 1;
-  
-  // sort1 = same
-  if (arrayA[sort2] < arrayB[sort2]) return -1;
-  if (arrayA[sort2] > arrayB[sort2]) return 1;
-  
-  // both columns match (same same)
-  return 0;
-}
-
-
-
-// copy & paste columns A-D from 'list Reportbooks' to 'Reportbooks Tracker'
-function copyReportbooksDataToTracker() {
-  var src_id = "1EAW-XHHtA1gIFoXe3sruqTHXtKi07xBxP4oXbWObCgU";
-  var src = SpreadsheetApp.openById(src_id);
-  var dev_dest_id = "155iI_z7IuBsjodEWBPFPgzW9QcbiwYqA3yrI8BP55-w";
-  var dest_id = "1D3OEcKrRIWpJmopP07u-KWh6sQHae2Q3dSTzo6uMFVc";
-  
-  if (testing) {
-    dest_id = dev_dest_id; 
-  }
-  Logger.log('dest_id: ' + dest);
-  
-  // copy cells
-  var cells = src.getRange("A1:D").getValues();  
-  Logger.log(cells);
-  
-  var dest = SpreadsheetApp.openById(dest_id);
-  Logger.log(dest.getName());
-
-  var sheets = dest.getSheets();
-  var sheet = dest.setActiveSheet(sheets[0]);
-
-  // paste cells
-  sheet.getRange(1, 1, cells.length, cells[0].length).setValues(cells);
-}
-
-
-function test_killSheets() {
-  var lisa = "1-L0dJ5d0ZE3QaVtR-6dTlAJVLVvc4cgWb_Twu5Zby-A"; 
-  var ss = SpreadsheetApp.openById(lisa);
-  killSheets(ss, [/.*_backup/]);
-}
-
-function killUnwantedPortfolioSheets() {
-  var students = getStudents();
-  for (var i=0; i<students.length; i++) {
-    var ss = SpreadsheetApp.openById(students[i].fileid);
-    console.warn("[%s] Checking for unwanted sheets to kill", students[i].fullname);
-    killSheets(ss, [/.*_backup/, /English L/, /English Li/]);
-    //if (i > 2) break;
-  }
-}
-
-function killSheets(ss, killPatterns) {
-  if (killPatterns === undefined) {
-    return;
-  }
-  
-  var sheets = ss.getSheets();
-  // kill all the sheets we DON'T want any more
-  sheets.forEach(function (s, i) {
-    var sheetName = s.getName();
-    
-    killPatterns.forEach(function (pattern, j) {
-      
-      if(sheetName.match(pattern) ) {
-        ss.deleteSheet(s);  // UNCOMMENT THIS LINE TO USE
-        console.log ("[%s] '%s' found in sheetName '%s', killing", ss.getName(), pattern, sheetName);
+function killByName() {
+  /*
+  WHAT: Remove bad / misnamed / duplicate sheets matched by killPatterns in Portfolios ticked for 'Export'
+  WHY1: When the exportAll script copies the SUB sheet to a Portfolio, it then
+        tries to rename it. If the name already exists, you'll be left with 'Copy of SUB'
+  WHY2: If a teacher changes the name of the subject in the Overview tab of their Reportbook
+        AFTER the tabs have been generated, you'll end up with two near-identical tabs.
         
-      } else {
-        // Logger.log ("'%s' not found in sheetName '%s', skipping", pattern, sheetName); 
+  HOW:  Enter the name of the unwanted tab in the killPatterns regex. If you don't understand regex, go learn, I'll wait.
+        Patterns are case-sensitive, so 'art' will match '' but not 'Art'
+        To lock to the start of the sheetname, put ^ at the beginning, eg /^IGCSE/ will kill any sheet starting with 'IGCSE'
+        To lock to the end of the sheetname, put $ at the end, eg /HL$/ will kill all sheets ending with 'HL'
+        
+        Unless locked, patterns will match ANYWHERE in the sheet name, so 
+        /Art/ will match 'Visual Arts', but /Visual Art$/ won't
+        /Theory/ will match 'IB Theory of Knowledge', but /^Theory/ won't
+        
+  */
+  
+  // Test your regex before deploying! https://regex101.com/r/PjK1bJ/1
+  
+  logMe("START killByName()");
+  
+  // kill everything except Admin & Pastoral
+  var managers = ["Cheryl", "Mike", "Cath", "Eric"];
+  
+  var keepPatterns = [/(Admin|Pastoral)/];
+  var killPatterns = [/(^Copy of SUB|Subject Year 00|Select a student)/];
+  
+  var forReal = true; // set true to actually delete the sheets matched, false to view them
+  
+  return keepKillPortfolioSheets(keepPatterns, killPatterns, forReal);  
+  logMe("END killByName()");
+}
+
+
+function keepAdminPastoralKillAllSubjects() {
+  console.log("START keepAdminPastoralKillAllSubjects()");
+  
+  // kill everything except Admin & Pastoral
+  var keepPatterns = [/(Admin|Pastoral)/];
+  var killPatterns = [/.*/];
+  var forReal = false; // set true to actually delete the sheets matched, false to view them
+  
+  return keepKillPortfolioSheets(keepPatterns, killPatterns, forReal);
+}
+
+function keepKillPortfolioSheets(keepPatterns, killPatterns, forReal) {
+  if (forReal === undefined) {
+    forReal = false;
+  }
+  
+  //logMe("START keepKillPortfolioSheets keep: " + keepPatterns + ", kill: " + killPatterns + " forReal: " + forReal);
+  
+  var students = getStudents();
+  var selectedStudentEmails = getEmailsToUpdate();
+  
+  var sheetsKilled = [];
+  
+  for (var i = 0; i < students.length; i++) {
+    if (selectedStudentEmails.indexOf( students[i].email ) == -1) continue;
+
+    var ss = SpreadsheetApp.openById( students[i].fileid );
+    console.warn("[%s] Checking for unwanted sheets to kill", students[i].fullname);
+    
+    console.warn("keepSheets: %s, killSheets:", keepPatterns, killPatterns);
+    var thisSheetKills = keepKillSheets(ss, keepPatterns, killPatterns, forReal);
+    
+    // is this sheet in the 'killed' list?
+    thisSheetKills.forEach(function (sheetName, j) {
+      if (sheetsKilled.indexOf(sheetName) == -1) {
+        sheetsKilled.push(sheetName);
       }
     });
-  });
+    grabPortfolioTabsAndGrades(students[i]);
+  }
+  if (sheetsKilled.length == 0) {
+    logMe("SUMMARY: No sheets deleted.");
+  } else {
+    if (forReal) {
+      logMe("SUMMARY: deleted " + sheetsKilled.join(", "));
+    } else {
+      logMe("SUMMARY: found " + sheetsKilled.join(", "));
+    }
+  }
+  console.log("END keepKillPortfolioSheets()");
+  
+  return sheetsKilled;
 }
 
 
-function generateAllPortfolioPDFs() {
-  var students = getStudents();
-  var pdfYears = ['Y10'];
+function TEST_keepKillSheets() {
+  console.log("TEST_keepKillSheets()");
   
-  for (var s = 0; s < students.length; s++) {
-    //if (s > 5) break;
-    
-    var student = students[s];
-    
-    // if (student.firstname != "Hahun") continue;
-    
-    var skipPDF = pdfYears.indexOf(student.year) == -1;
-    if (skipPDF) {
-      console.log("Skipping PDF export for %s in %s", student.fullname, student.year);
-      continue;
-    }
-    console.log("Export PDF for %s", student.fullname); 
-    var pf = SpreadsheetApp.openById(student.fileid);
+  var lisa = "1sS-WJZI3uBvQCx396gQPJNoxok9i9OERAFm8OSqohqg"; 
+  var ss = SpreadsheetApp.openById(lisa);
+  var forReal = false;
+  
+  keepKillSheets(ss, [/.*_backup/], forReal); // incorrect parameters, should fail
+  keepKillSheets(ss, [/(Admin|Pastoral)/], [/.*/], forReal); // correct parameters, should pass
+  
+  console.log("END TEST_keepKillSheets()");
 
-    createPdf(pf, student.guardianemail, [/^Admin$/, /.*_backup/], [/^Admin$/]);
+}
+
+
+function keepKillSheets(ss, keepPatterns, killPatterns, forReal) {
+  if (keepPatterns === undefined || killPatterns === undefined) {
+    console.error("keepKillSheets called with incorrect parameters - aborted");
+    return false;
   }
   
+  if (forReal === undefined) {
+    forReal = false; 
+  }
+  
+  var sheets = ss.getSheets();
+  
+  var sheetsKilled = [];
+  
+  // kill all the sheets we DON'T want, unless they match keepPatterns
+  sheets.forEach(function (s, i) {
+    var sheetName = s.getName();
+    var keep = false;
+    var kill = false; 
+    
+    keepPatterns.forEach(function (pattern, j) {
+      
+      if(sheetName.match(pattern) ) {
+        keep = true;
+        console.log ("[%s] '%s' found in sheetName '%s', adding KEEP tag", ss.getName(), pattern, sheetName);
+        
+      } else {
+        console.log ("'%s' not found in sheetName '%s', no KEEP tag", pattern, sheetName); 
+      }
+    });
+    
+    if (! keep) {
+    
+      killPatterns.forEach(function (pattern, j) {
+        
+        if(sheetName.match(pattern) ) {
+          kill = true;
+          console.log ("'%s' found in sheetName '%s', adding KILL tag", pattern, sheetName); 
+        } else {
+          console.log ("'%s' not found in sheetName '%s', no KILL tag", pattern, sheetName); 
+        }
+        
+      });
+    }
+    
+    if (kill && ! keep) {
+      sheetsKilled.push(sheetName);
+      
+      if (forReal) {
+        ss.deleteSheet(s);  // (UN) COMMENT THIS LINE TO (USE) TEST
+        logMe ("DELETED sheet " + sheetName + " in file " + ss.getName());
+      } else {
+        logMe ("FOUND sheet " + sheetName + " in file " + ss.getName()); 
+      }
+    }
+    
+  });
+  
+  return sheetsKilled;
+}
+
+
+
+
+/**
+ * Generate PDFs from Portfolios 
+ * @param {string} rbTrackerId
+ * @return {array} list of created rbIds
+ */
+function generateSelectedPortfolioPDFs(sendEmails) {
+  if (sendEmails === undefined) {
+    sendEmails = false;
+  }
+
+  logMe("START generateAllPortfolioPDFs()", 'warn');
+  
+  var students = getStudents();  
+  var selectedStudentEmails = getEmailsToUpdate();  
+
+  //var pdfYears = ['Y10','Y12'];
+  var countOfPdfs = 0;
+  
+  for (var s = 0; s < students.length; s++) {
+    if (countOfPdfs > 1) break; // SAFETY CATCH
+    
+    var student = students[s];
+    if (selectedStudentEmails.indexOf(student.email) > -1) {
+      Logger.log(student.year);
+      
+      // if (student.firstname == "Hahun") continue;
+      
+      logMe("PDF: Exporting " + student.fullname); 
+      var pf = SpreadsheetApp.openById(student.fileid);
+      
+      var guardianEmail = sendEmails ? student.guardianemail : "";
+      
+      createPdf(pf, guardianEmail, [/^Admin$/, /.*_backup/], [/^Admin$/]);
+    }
+  }
+  logMe("END generateAllPortfolioPDFs()", 'warn');
 }
 
 function test_createPdf() {
@@ -191,6 +221,14 @@ function test_createPdf() {
   createPdf(pf, student.guardianemail, [/^Admin$/, /.*_backup/], [/^Admin$/]);
 }
 
+/**
+ * Generate a PDF from a Portfolio, optionally emailing to guardian 
+ * @param {object} ss reference to portfolio
+ * @param {string} [guardianEmail]
+ * @return {array} [hideBeforePatterns] list of sheet names that should be hidden prior to PDFing (regex patterns)
+ * @return {array} [showAfterPatterns]  list of sheet names that should be shown again after PDFing (regex patterns)
+ * @return {} doesn't return anything (but probably should!)
+ */
 function createPdf(ss, guardianEmail, hideBeforePatterns, showAfterPatterns) {
   if (hideBeforePatterns === undefined) {
     hideBeforePatterns = [];
@@ -242,7 +280,7 @@ function createPdf(ss, guardianEmail, hideBeforePatterns, showAfterPatterns) {
 
 function savePDF( ss, optEmail) {
   var outputName = ss.getName(); 
-  console.log("Exporting PDF %s", outputName);
+  logMe("Exporting PDF " + outputName);
   
   // Get folder containing spreadsheet, for later export
   var parents = DriveApp.getFileById(ss.getId()).getParents();
@@ -297,9 +335,18 @@ function savePDF( ss, optEmail) {
   var response = UrlFetchApp.fetch(url_base + url_ext, options);
   var blob = response.getBlob().setName((outputName)+ '.pdf');
   folder.createFile(blob);
-  
+
   if (optEmail) {
-    GmailApp.sendEmail(optEmail, "School Report for " + outputName, "Dear Parents,\nPlease contact the subject teacher if you have subject specific questions.\n\nWarm regards,\nMongkul\nPA to the Principal.", {attachments:blob});
+    logMe("Guardian email: " + optEmail); 
+
+    console.log("Sending email");
+    var body = "Dear Parents,\nPlease find attached your child's report. Please contact the subject teacher if you have subject-specific questions.\n\nWarm regards,\nSecondary Principal.";
+    
+    //body = "Dear Parents,\nPlease find attached an UPDATED version of your child's report. A geography score had been omitted.\n\nWarm regards,\nMongkul\nPA to the Principal.";
+
+    GmailApp.sendEmail(optEmail, "School Report for " + outputName, body, {attachments:blob});
+  } else {
+    console.log("Skipping email");
   }
 } 
 
@@ -524,6 +571,123 @@ function run() {
   var srcFolderId = "### folder ID with source files ###";
   var dstFolderId = "### destination folder ID ###";
   copyFolder(srcFolderId, dstFolderId);
+}
+
+
+
+// wrapper to move newly shared files to Reportbooks folder 
+// then add them to the Reportbook Tracker
+function listReportbooks() {
+  Logger.log("Moving any newly shared reportbooks into the Reportbooks folder");
+  movedFiles = moveSharedReportbooks();
+  if (movedFiles.length > 0) {
+    Logger.log(movedFiles);
+  }
+  
+  Logger.log("Copying list of files in Reportbooks folder to Reportbooks Tracker spreadsheet");
+  listOfRBs = listFolderIntoSheet('Reportbooks');
+  
+  copyReportbooksDataToTracker();
+}
+
+// generates a spreadsheet containing id, title, URL and owner for each item in the Reportbooks folder (top-level)
+function listFolderIntoSheet(foldername) {
+  // var foldername = '';
+  var filename = 'list ' + foldername;
+  var folderID =  folderRB;
+  var folder = DriveApp.getFolderById(folderID);
+  var contents = folder.getFiles();
+  var src_id = "1EAW-XHHtA1gIFoXe3sruqTHXtKi07xBxP4oXbWObCgU";
+  
+  try {
+    var ss = SpreadsheetApp.openById(src_id);
+    Logger.log('Successfully opened file ' + src_id);
+    }
+  
+  catch (err) {
+    Logger.log(err)
+    var ss = SpreadsheetApp.create(filename);
+    var src_id = ss.getId();
+    Logger.log('Created new listing file: ' + src_id);
+  }
+  
+  var fileId = ss.getId();
+  Logger.log('fileId: ' + fileId);
+  
+  var sheets = ss.getSheets();
+  var sheet = ss.setActiveSheet(sheets[0]);
+  sheet.clearContents();
+    
+  var id, file, title, link, owner, name;
+  var row;
+  var cells = [];
+  
+  while(contents.hasNext()) {
+    file = contents.next();
+    id = file.getId();
+    title = file.getName();
+    link = file.getUrl();
+    owner = file.getOwner().getName();
+    name = file.getOwner().getEmail();
+    
+    cells.push([id, title, link, owner, name]);
+  }
+
+  cells.sort(Comparator);
+  cells = [['id', 'title', 'link', 'owner', 'email']].concat(cells);
+  
+  Logger.log("Got the cells");
+  //Logger.log(cells);
+  sheet.getRange(1, 1, cells.length, cells[0].length).setValues(cells);
+
+  return true;
+
+};
+
+
+
+// sort by columns
+function Comparator(arrayA, arrayB) {
+  var sort1 = 3;
+  var sort2 = 1;
+  
+  if (arrayA[sort1] < arrayB[sort1]) return -1;
+  if (arrayA[sort1] > arrayB[sort1]) return 1;
+  
+  // sort1 = same
+  if (arrayA[sort2] < arrayB[sort2]) return -1;
+  if (arrayA[sort2] > arrayB[sort2]) return 1;
+  
+  // both columns match (same same)
+  return 0;
+}
+
+
+
+// copy & paste columns A-D from 'list Reportbooks' to 'Reportbooks Tracker'
+function copyReportbooksDataToTracker() {
+  var src_id = "1EAW-XHHtA1gIFoXe3sruqTHXtKi07xBxP4oXbWObCgU";
+  var src = SpreadsheetApp.openById(src_id);
+  var dev_dest_id = "155iI_z7IuBsjodEWBPFPgzW9QcbiwYqA3yrI8BP55-w";
+  var dest_id = "1D3OEcKrRIWpJmopP07u-KWh6sQHae2Q3dSTzo6uMFVc";
+  
+  if (testing) {
+    dest_id = dev_dest_id; 
+  }
+  Logger.log('dest_id: ' + dest);
+  
+  // copy cells
+  var cells = src.getRange("A1:D").getValues();  
+  Logger.log(cells);
+  
+  var dest = SpreadsheetApp.openById(dest_id);
+  Logger.log(dest.getName());
+
+  var sheets = dest.getSheets();
+  var sheet = dest.setActiveSheet(sheets[0]);
+
+  // paste cells
+  sheet.getRange(1, 1, cells.length, cells[0].length).setValues(cells);
 }
 
 
